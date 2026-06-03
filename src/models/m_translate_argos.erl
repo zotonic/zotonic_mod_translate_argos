@@ -73,12 +73,12 @@ is_configured() ->
     Reason :: term().
 %% @doc Create or update the shared virtualenv and install requirements.
 install_python() ->
-    VenvPython = venv_python(),
     Requirements = priv_file("python/requirements.txt"),
     case z_python:ensure_venv(python_command(), zotonic_mod_translate_argos) of
         ok ->
-            case z_python:pip_install(VenvPython, Requirements) of
-                ok -> ok;
+            case z_python:venv_python_result(zotonic_mod_translate_argos) of
+                {ok, VenvPython} ->
+                    z_python:pip_install(VenvPython, Requirements);
                 {error, _} = Error ->
                     Error
             end;
@@ -456,7 +456,8 @@ command() ->
     [
         unicode:characters_to_list(Python),
         unicode:characters_to_list(priv_file("python/translate_argos.py")),
-        unicode:characters_to_list(data_dir("argos"))
+        unicode:characters_to_list(data_dir("argos")),
+        <<"auto">>
     ].
 
 %% @doc Return the global local name used for the shared Argos worker.

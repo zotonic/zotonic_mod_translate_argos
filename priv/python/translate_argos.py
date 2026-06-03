@@ -30,6 +30,9 @@ if len(sys.argv) > 1:
     os.environ.setdefault("XDG_CACHE_HOME", os.path.join(argos_data_dir, "cache"))
     os.environ.setdefault("ARGOS_PACKAGES_DIR", os.path.join(argos_data_dir, "packages"))
 
+if len(sys.argv) > 2:
+    os.environ.setdefault("ARGOS_DEVICE_TYPE", sys.argv[2])
+
 try:
     import argostranslate.package
     import argostranslate.tags
