@@ -1,0 +1,5 @@
+%% -*- mode: erlang -*-
+[
+ {admin_translate_argos, ["admin", "config", "argos-translate"], controller_admin,
+  [{acl_module, mod_admin_config}, {template, <<"admin_translate_argos.tpl">>}, {selected, admin_translate_argos}, seo_noindex]}
+].

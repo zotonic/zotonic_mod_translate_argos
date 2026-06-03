@@ -1,0 +1,17 @@
+{application, zotonic_mod_translate_argos, [
+    {description, "Translation service using Argos Translate"},
+    {vsn, "git"},
+    {registered, []},
+    {applications, [
+        kernel, stdlib,
+        erlexec,
+        zotonic_stdlib,
+        zotonic_core, zotonic_mod_admin,
+        zotonic_mod_translation
+    ]},
+    {env, []},
+    {modules, []},
+    {maintainers, []},
+    {licenses, ["Apache-2.0"]},
+    {links, [{"GitHub", "https://github.com/zotonic/zotonic"}]}
+]}.
