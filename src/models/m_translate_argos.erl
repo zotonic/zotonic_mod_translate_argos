@@ -135,7 +135,7 @@ translate_batch(WorkerFun, SourceCode, TargetCode, Batch) ->
             {ok, Translations};
         {ok, Response} ->
             ?LOG_ERROR(#{
-                in => ?MODULE,
+                in => zotonic_mod_translate_argos,
                 text => <<"Unexpected result from Argos Translate">>,
                 result => error,
                 reason => unknown_response,
@@ -146,7 +146,7 @@ translate_batch(WorkerFun, SourceCode, TargetCode, Batch) ->
             {error, unknown_response};
         {error, Reason} ->
             ?LOG_ERROR(#{
-                in => ?MODULE,
+                in => zotonic_mod_translate_argos,
                 text => <<"Error result from Argos Translate">>,
                 result => error,
                 reason => Reason,
@@ -222,7 +222,7 @@ take_batch([Text | Rest], Size, Acc) ->
 log_translate_start(SourceCode, TargetCode, Batch) ->
     Started = erlang:monotonic_time(millisecond),
     ?LOG_INFO(#{
-        in => ?MODULE,
+        in => zotonic_mod_translate_argos,
         text => <<"Sending strings to Argos Translate">>,
         count => length(Batch),
         source_language => SourceCode,
@@ -233,7 +233,7 @@ log_translate_start(SourceCode, TargetCode, Batch) ->
 %% @doc Log the elapsed time for a completed Argos translation request.
 log_translate_done(SourceCode, TargetCode, Batch, Started, Result) ->
     ?LOG_INFO(#{
-        in => ?MODULE,
+        in => zotonic_mod_translate_argos,
         text => <<"Argos Translate finished">>,
         count => length(Batch),
         duration_ms => erlang:monotonic_time(millisecond) - Started,

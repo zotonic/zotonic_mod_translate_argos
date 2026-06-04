@@ -408,7 +408,7 @@ ensure_python(#state{ python_pid = undefined, cmd = Cmd } = State) ->
             State#state{ python_pid = Pid, os_pid = OsPid };
         {error, Reason} ->
             ?LOG_ERROR(#{
-                in => ?MODULE,
+                in => zotonic_mod_translate_argos,
                 text => <<"Could not start Argos Translate Python process">>,
                 result => error,
                 reason => Reason
@@ -432,8 +432,10 @@ log_stderr_line(Line) ->
             ok;
         false ->
             ?LOG_WARNING(#{
-                in => ?MODULE,
+                in => zotonic_mod_translate_argos,
                 text => <<"Argos Translate Python stderr">>,
+                result => error,
+                reason => stderr,
                 message => Line
             })
     end.
