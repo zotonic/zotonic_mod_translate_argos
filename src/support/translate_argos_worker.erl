@@ -185,36 +185,6 @@ handle_call({update_packages, Timeout}, From, State) ->
 handle_call(_Msg, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
-%% @doc Start a request immediately or enqueue it while another request is pending.
-handle_request(_Position, Request, Timeout, From, #state{ pending = undefined } = State) ->
-    send_request(Request, Timeout, From, State);
-handle_request(Position, Request, Timeout, From, State) ->
-    enqueue_request(Position, Request, Timeout, From, State).
-
-%% @doc Ensure Python is running, send one JSON request, and arm its timeout.
-send_request(Request, Timeout, From, State) ->
-    State1 = ensure_python(State),
-    case State1#state.python_pid of
-        undefined ->
-            {reply, {error, python_not_started}, State1};
-        Pid ->
-            ReqId = erlang:unique_integer([positive, monotonic]),
-            Payload = z_json:encode(Request#{ <<"id">> => ReqId }),
-            ok = exec:send(Pid, <<Payload/binary, $\n>>),
-            Timer = erlang:send_after(Timeout, self(), {translate_timeout, ReqId}),
-            {noreply, State1#state{ pending = {ReqId, From}, pending_timer = Timer }}
-    end.
-
-%% @doc Queue a request, bounded by the configured maximum queue length.
-enqueue_request(_Position, _Request, _Timeout, _From, #state{ queue_len = Len, max_queue = MaxQueue } = State) when Len >= MaxQueue ->
-    {reply, {error, queue_full}, State};
-enqueue_request(Position, Request, Timeout, From, State) ->
-    Caller = caller_pid(From),
-    Monitor = erlang:monitor(process, Caller),
-    Expires = erlang:monotonic_time(millisecond) + Timeout + 5000,
-    Item = {Request, Timeout, From, Caller, Monitor, Expires},
-    {noreply, queue_request(Position, Item, State)}.
-
 %% @doc Ignore asynchronous casts; this worker only uses calls and process messages.
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -226,7 +196,7 @@ handle_info({stderr, OsPid, Data}, #state{ os_pid = OsPid } = State) ->
     log_stderr(Data),
     {noreply, State};
 handle_info({'DOWN', OsPid, process, _Pid, Reason}, #state{ os_pid = OsPid } = State) ->
-    State1 = reply_pending({error, #{ python_down => Reason }}, State),
+    State1 = reply_pending({error, #{ reason => python_down, detail => Reason }}, State),
     State2 = State1#state{ python_pid = undefined, os_pid = undefined, stdout = <<>> },
     {noreply, start_next_request(State2)};
 handle_info({translate_timeout, ReqId}, #state{ pending = {ReqId, _From} } = State) ->
@@ -250,6 +220,37 @@ code_change(_Vsn, State, _Extra) ->
 
 %%%%%%%% Internal Functions %%%%%%%%
 
+%% @doc Start a request immediately or enqueue it while another request is pending.
+handle_request(_Position, Request, Timeout, From, #state{ pending = undefined } = State) ->
+    send_request(Request, Timeout, From, State);
+handle_request(Position, Request, Timeout, From, State) ->
+    enqueue_request(Position, Request, Timeout, From, State).
+
+%% @doc Ensure Python is running, send one JSON request, and arm its timeout.
+send_request(Request, Timeout, From, State) ->
+    State1 = ensure_python(State),
+    case State1#state.python_pid of
+        undefined ->
+            {reply, {error, python_not_started}, State1};
+        Pid ->
+            ReqId = erlang:unique_integer([positive, monotonic]),
+            Payload = z_json:encode(Request#{ <<"id">> => ReqId }),
+            ok = exec:send(Pid, <<Payload/binary, $\n>>),
+            Timer = erlang:send_after(Timeout, self(), {translate_timeout, ReqId}),
+            {noreply, State1#state{ pending = {ReqId, From}, pending_timer = Timer }}
+    end.
+
+%% @doc Queue a request, bounded by the configured maximum queue length.
+enqueue_request(_Position, _Request, _Timeout, _From, #state{ queue_len = Len, max_queue = MaxQueue } = State) when Len >= MaxQueue ->
+    {reply, {error, overload}, State};
+enqueue_request(Position, Request, Timeout, From, State) ->
+    Caller = caller_pid(From),
+    Monitor = erlang:monitor(process, Caller),
+    Expires = erlang:monotonic_time(millisecond) + Timeout + 5000,
+    Item = {Request, Timeout, From, Caller, Monitor, Expires},
+    {noreply, queue_request(Position, Item, State)}.
+
+
 %% @doc Buffer stdout until complete JSON response lines are available.
 handle_stdout(Data, State) when size(Data) =< ?MAX_OUTPUT_SIZE ->
     case binary:split(Data, <<"\n">>) of
@@ -272,7 +273,7 @@ handle_stdout_line(<<>>, State) ->
     State;
 handle_stdout_line(Line, State) ->
     try
-        handle_python_response(jsx:decode(Line, [return_maps]), State)
+        handle_python_response(z_json:decode(Line), State)
     catch
         error:Reason ->
             State1 = reply_pending({error, #{ reason => invalid_json, detail => Reason, stdout => Line }}, State),
@@ -283,11 +284,29 @@ handle_stdout_line(Line, State) ->
 handle_python_response(#{ <<"id">> := ReqId, <<"translations">> := Translations }, #state{ pending = {ReqId, _From} } = State) ->
     start_next_request(reply_pending({ok, #{ <<"translations">> => Translations }}, State));
 handle_python_response(#{ <<"id">> := ReqId, <<"error">> := Reason }, #state{ pending = {ReqId, _From} } = State) ->
-    start_next_request(reply_pending({ok, #{ <<"error">> => Reason }}, State));
+    start_next_request(reply_pending({error, normalize_error(Reason)}, State));
 handle_python_response(#{ <<"id">> := ReqId } = Response, #state{ pending = {ReqId, _From} } = State) ->
     start_next_request(reply_pending({ok, maps:remove(<<"id">>, Response)}, State));
 handle_python_response(_Response, State) ->
     State.
+
+%% @doc Normalize Python worker errors to atoms or structured error maps.
+normalize_error(<<"argostranslate_import">>) -> argostranslate_import;
+normalize_error(<<"translation">>) -> translation;
+normalize_error(<<"invalid_op">>) -> invalid_op;
+normalize_error(<<"invalid_id">>) -> invalid_id;
+normalize_error(<<"invalid_language">>) -> invalid_language;
+normalize_error(<<"invalid_texts">>) -> invalid_texts;
+normalize_error(<<"language_pair">>) -> language_pair;
+normalize_error(<<"packages">>) -> packages;
+normalize_error(<<"update_packages">>) -> update_packages;
+normalize_error(<<"invalid_package">>) -> invalid_package;
+normalize_error(<<"package_not_found">>) -> package_not_found;
+normalize_error(<<"install_package">>) -> install_package;
+normalize_error(Reason) when is_binary(Reason) ->
+    #{ reason => python_error, message => Reason };
+normalize_error(Reason) ->
+    Reason.
 
 %% @doc Reply to the pending caller, if there is one.
 reply_pending(_Reply, #state{ pending = undefined } = State) ->

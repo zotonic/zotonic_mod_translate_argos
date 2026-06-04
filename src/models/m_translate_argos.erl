@@ -133,16 +133,6 @@ translate_batch(WorkerFun, SourceCode, TargetCode, Batch) ->
     case Result of
         {ok, #{ <<"translations">> := Translations }} when is_list(Translations) ->
             {ok, Translations};
-        {ok, #{ <<"error">> := Reason }} ->
-            ?LOG_ERROR(#{
-                in => ?MODULE,
-                text => <<"Error result from Argos Translate">>,
-                result => error,
-                reason => Reason,
-                source_language => SourceCode,
-                target_language => TargetCode
-            }),
-            {error, Reason};
         {ok, Response} ->
             ?LOG_ERROR(#{
                 in => ?MODULE,
@@ -255,8 +245,6 @@ log_translate_done(SourceCode, TargetCode, Batch, Started, Result) ->
 %% @doc Return a compact log status for a translation response.
 translate_result({ok, #{ <<"translations">> := Translations }}) when is_list(Translations) ->
     ok;
-translate_result({ok, #{ <<"error">> := _Reason }}) ->
-    error;
 translate_result({ok, _Response}) ->
     unexpected_response;
 translate_result({error, _Reason}) ->
@@ -291,29 +279,80 @@ packages(Context) ->
                 packages => [ normalize_package(Pkg) || Pkg <- Packages ],
                 error => undefined
             }};
-        {ok, #{ <<"error">> := Reason }} ->
-            {error, package_error(Reason)};
+        {error, eacces} = Error ->
+            Error;
+        {error, timeout} = Error ->
+            Error;
         {error, Reason} ->
-            {error, package_error(Reason)}
+            package_error_result(Reason)
     end.
 
--spec package_error(Reason) -> atom() when
+-spec package_error_result(Reason) -> {ok, map()} when
     Reason :: term().
-%% @doc Map package-list failures to public error codes without internal paths.
-package_error(<<"argostranslate_import">>) ->
-    argostranslate_import;
-package_error(<<"packages">>) ->
-    argos_packages;
-package_error(#{ command := _Command }) ->
-    python_install;
-package_error(#{ <<"command">> := _Command }) ->
-    python_install;
-package_error(#{ python_down := _Reason }) ->
-    python_down;
-package_error(Reason) when is_atom(Reason) ->
+%% @doc Return a template-friendly package-list error map.
+package_error_result(Reason) ->
+    {ok, #{
+        packages => [],
+        error => Reason,
+        error_reason => error_reason(Reason),
+        error_message => error_message(Reason)
+    }}.
+
+%% @doc Return a compact error reason for display.
+error_reason(#{ reason := Reason }) ->
     Reason;
-package_error(_Reason) ->
-    argos_packages.
+error_reason(Reason) ->
+    Reason.
+
+%% @doc Return a human-readable error message for display.
+error_message(#{ message := Message }) ->
+    Message;
+error_message(#{ command := Command, reason := Reason }) ->
+    format_error_message("Command failed: ~p (~p)", [ Command, Reason ]);
+error_message(#{ reason := python_down, detail := Reason }) ->
+    format_error_message("Python worker stopped: ~p", [ Reason ]);
+error_message(#{ reason := Reason } = Error) ->
+    format_error_message("~p: ~p", [ Reason, Error ]);
+error_message(Error) when is_map(Error) ->
+    format_error_message("~p", [ Error ]);
+error_message(overload) ->
+    <<"The Argos Translate worker is overloaded.">>;
+error_message(argostranslate_import) ->
+    <<"The Python argostranslate package could not be imported.">>;
+error_message(packages) ->
+    <<"Argos Translate could not fetch the package list.">>;
+error_message(update_packages) ->
+    <<"Argos Translate could not update the package index.">>;
+error_message(install_package) ->
+    <<"Argos Translate could not install the package.">>;
+error_message(python_not_started) ->
+    <<"The Argos Translate Python worker could not be started.">>;
+error_message(output_too_large) ->
+    <<"The Argos Translate Python worker returned too much data.">>;
+error_message(invalid_json) ->
+    <<"The Argos Translate Python worker returned invalid JSON.">>;
+error_message(Reason) ->
+    z_convert:to_binary(Reason).
+
+-spec format_error_message(Format, Args) -> binary() when
+    Format :: string(),
+    Args :: list().
+%% @doc Format an error message as Unicode-safe binary text.
+format_error_message(Format, Args) ->
+    unicode_to_binary(io_lib:format(Format, Args)).
+
+-spec unicode_to_binary(Text) -> binary() when
+    Text :: unicode:chardata().
+%% @doc Convert Unicode chardata to binary and handle invalid Unicode data.
+unicode_to_binary(Text) ->
+    case unicode:characters_to_binary(Text) of
+        Bin when is_binary(Bin) ->
+            Bin;
+        {error, Bin, _Rest} ->
+            <<Bin/binary, " [invalid unicode data]">>;
+        {incomplete, Bin, _Rest} ->
+            <<Bin/binary, " [incomplete unicode data]">>
+    end.
 
 -spec package(PackageName, Context) -> map() | undefined when
     PackageName :: binary(),

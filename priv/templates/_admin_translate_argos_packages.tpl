@@ -3,7 +3,15 @@
         <p class="alert alert-danger">
             {_ Could not load the Argos Translate language packages. _}
             <br>
-            <code>{{ result.error|escape }}</code>
+            {% if result.error_reason %}
+                <strong>{{ result.error_reason|escape }}</strong>
+            {% else %}
+                <strong>{{ result.error|escape }}</strong>
+            {% endif %}
+            {% if result.error_message %}
+                <br>
+                <code>{{ result.error_message|escape }}</code>
+            {% endif %}
         </p>
     {% else %}
         <div class="widget">
