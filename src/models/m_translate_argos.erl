@@ -18,6 +18,65 @@
 %% limitations under the License.
 
 -module(m_translate_argos).
+-moduledoc(#{
+    zotonic_keywords => [
+        "reference", "backend_developer", "model", "localization_and_translation",
+        "translated_text", "language_code", "api_and_integration"
+    ]
+}).
+-moduledoc("
+Translate plain text and HTML with Argos Translate and manage its language
+packages through a shared local Python worker.
+
+## Model API
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `get` | `is_configured` | Whether a Python command is configured. |
+| `get` | `packages` | Available and installed package information; requires `use.mod_admin_config`. |
+
+For example, templates can read `m.translate_argos.is_configured` and
+`m.translate_argos.packages`. The configuration check does not verify that Python
+can start, Argos is installed, or the required language packages are available.
+Unknown paths return `{error, enoent}`. Translation is an Erlang API, not a model
+POST endpoint.
+
+The package result contains `packages` and `error`. Each package includes its
+name, source and target language codes and names, available and installed
+versions, and `installed` and `outdated` flags. Some worker errors are returned
+as an empty package list with `error`, `error_reason`, and `error_message` for
+display; access and timeout errors remain `{error, Reason}` results.
+
+## Erlang API
+
+`translate/4` translates a list of binary plain texts. `translate_html/4`
+segments HTML and restores its structure after translation. `translate_tags/4`
+is the lower-level tagged-text interface used by the HTML helper. All three
+take source language, target language, texts, and context, and return
+`{ok, TranslatedTexts}` or `{error, Reason}`.
+
+```erlang
+m_translate_argos:translate(en, nl, [<<\"Hello\">>, <<\"Welcome\">>], Context).
+```
+
+Both languages are required: missing or sentinel source/target languages return
+`{error, source_language}` or `{error, target_language}`. Codes are lowercased
+and regional variants reduced to their primary language. Plain and tagged
+translations are batched, preserving order; the first failed batch ends the call.
+
+`packages/1`, `package/2`, `install_package/2`, and `update_packages/1` support
+package administration. `install_python/0` installs dependencies in the shared
+virtual environment; `ensure_python/0` checks imports and installs if needed.
+Worker startup is lazy and shared by all sites. `timeout/1` reads the site's
+request timeout, with a default of `120000` milliseconds.
+
+## Access control
+
+Direct Erlang translation and package functions do not perform ACL checks.
+Callers must authorize their operation first. The `mod_translate_argos`
+translation observer checks `use.mod_translate_argos`; package model reads and
+admin postbacks check `use.mod_admin_config`.
+").
 
 -export([
     m_get/3,
